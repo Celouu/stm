@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>STM</title>
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="STM">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+<header class="navbar" id="navbar" aria-hidden="true"><div class="nav-in" id="navT"></div></header>
+<main class="app"><div id="view" class="view"></div></main>
+<nav class="tabbar" id="tabbar" aria-label="Navigation">
+  <div class="tab-ind" id="tabInd"></div>
+</nav>
+<div id="sheets"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="filePick" accept="application/pdf,image/*" multiple hidden>
+<input type="file" id="importPick" accept="application/json,.json" hidden>
+<script>
+{{JS}}
+</script>
+</body>
+</html>

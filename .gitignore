@@ -1,0 +1,13 @@
+# Contexte personnel : ne jamais publier
+CONTEXTE.local.md
+
+# Sauvegardes de l'app (données réelles en clair)
+stm-sauvegarde-*.json
+*.json.bak
+
+# Sorties des tests
+test/shots/
+test/*.json
+
+__pycache__/
+.DS_Store
