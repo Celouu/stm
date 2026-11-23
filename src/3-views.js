@@ -30,7 +30,7 @@ function pulseCard() {
     const last = latestBalance();
     return `<section class="sec"><div class="sec-head"><h2 class="sec-title">Jusqu'à la paie</h2>${head}</div>
       <div class="bigstat"><span>Ton solde maintenant, tous comptes courants</span>
-        <div class="row2" style="margin-top:10px;align-items:center">${moneyField('balNow', ui.balEdit && last ? last.amount : null, '0')}<button class="btn btn-primary" data-act="balSave">Calculer</button></div>
+        <div class="row2" style="margin-top:10px;align-items:center;grid-template-columns:1fr auto">${moneyField('balNow', ui.balEdit && last ? last.amount : null, '0', '', true)}<button class="btn btn-primary" data-act="balSave">Calculer</button></div>
         ${last ? '' : `<p class="hint" style="margin:10px 2px 0">STM ajoute ce qui doit encore passer d'ici ta paie et te dit combien tu peux dépenser par jour.</p>`}</div>
       ${affordBtn}</section>`;
   }

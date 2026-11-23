@@ -111,7 +111,21 @@ function wireControls(root) {
 const segVal = (root, name) => { const s = $(`[data-seg="${name}"]`, root); return s ? s.dataset.value : null; };
 const chipVal = (root, name) => { const s = $(`[data-chips="${name}"]`, root); return s ? s.dataset.value : null; };
 const fieldVal = (root, name) => { const el = $(`[name="${name}"]`, root); return el ? el.value.trim() : ''; };
-const moneyField = (name, value, ph = '0', cls = '') => `<div class="money ${cls}"><input class="input" name="${name}" inputmode="decimal" autocomplete="off" placeholder="${ph}" value="${esc(plainNum(value))}"></div>`;
+/* `signed` : montant qui peut être négatif (un solde à découvert). Le pavé « decimal » de l'iPhone
+   n'a pas de touche moins : un bouton ± dans le champ change le signe. */
+const moneyField = (name, value, ph = '0', cls = '', signed = false) => `<div class="money ${cls}${signed ? ' signed' : ''}">${signed ? `<button type="button" class="money-sign" data-sign aria-label="Montant négatif" aria-pressed="${value < 0}">${icon('pm', 20, 2.2)}</button>` : ''}<input class="input" name="${name}" inputmode="decimal" autocomplete="off" placeholder="${ph}" value="${esc(plainNum(value))}"></div>`;
+document.addEventListener('mousedown', e => { if (e.target.closest('[data-sign]')) e.preventDefault(); });  // le champ garde le clavier
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-sign]'); if (!b) return;
+  const inp = $('input', b.parentElement), v = inp.value.trim();
+  inp.value = v.startsWith('-') ? v.slice(1) : '-' + v;
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  inp.focus();
+});
+document.addEventListener('input', e => {
+  const m = e.target.closest && e.target.closest('.money.signed');
+  if (m) $('[data-sign]', m).setAttribute('aria-pressed', e.target.value.trim().startsWith('-'));
+});
 const monthOptions = sel => MONTHS.map((m, i) => `<option value="${i + 1}" ${i + 1 === sel ? 'selected' : ''}>${cap(m)}</option>`).join('');
 function shake(el) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
 function requireField(root, name, test, msg) {

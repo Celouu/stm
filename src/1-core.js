@@ -1,5 +1,5 @@
 /* ============ STM — Save the Moula ============ */
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 const SCHEMA = 2;
 
 /* ---------- utils ---------- */
@@ -600,6 +600,7 @@ const ICONS = {
   star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z',
   handshake: 'M3 11l4-4 3 1 3-2 5 4 3 1M3 11l6 6 2-1 2 2 2-1 2 1 4-5M9 13l2 2M12 11l3 3',
   plus: 'M12 5v14M5 12h14',
+  pm: 'M12 4v9M7.5 8.5h9M7.5 19h9',
   settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM9 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   chevL: 'M15 18l-6-6 6-6', chevR: 'M9 18l6-6-6-6', chevD: 'M6 9l6 6 6-6',
   calendar: 'M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4',

@@ -51,7 +51,7 @@ function openClosing(ym) {
       const s = monthSummary(ym);
       return `<div class="hero ${s.rest < 0 ? 'neg' : ''}" style="min-height:0"><div class="hero-label">Reste à vivre ${deMonth(ym)}</div><div class="hero-amount">${heroAmount(s.rest)}</div>
         <div class="hero-stats"><div class="hero-stat"><span>Revenus</span><b>${money(s.totIn)}</b></div><div class="hero-stat"><span>Charges</span><b>${money(s.totOut)}</b></div><div class="hero-stat"><span>Épargne</span><b>${money(s.savings)}</b></div></div></div>
-        <div class="field" style="margin-top:20px"><span class="lbl">Solde réel fin ${MONTHS_S[ymParts(ym)[1] - 1]} <span style="color:var(--t3)">comptes et livrets, hors placements</span></span>${moneyField('balance', draft.balance, 'Facultatif')}</div>
+        <div class="field" style="margin-top:20px"><span class="lbl">Solde réel fin ${MONTHS_S[ymParts(ym)[1] - 1]} <span style="color:var(--t3)">comptes et livrets, hors placements</span></span>${moneyField('balance', draft.balance, 'Facultatif', '', true)}</div>
         <div data-gap>${gapLine()}</div>
         <p class="step-lead" style="margin-top:16px">Tu pourras la rouvrir depuis la carte du mois.</p>`;
     }
@@ -139,32 +139,188 @@ async function syncCalendar() {
 function calMaybeSync() {
   if (state.settings.calReady && state.settings.calAuto && calPending()) setTimeout(syncCalendar, 450);
 }
+/* Guide pas à pas du raccourci « STM Calendrier » : un écran par partie, chaque action en fiche
+   (mot à chercher, champs à remplir) et le plan du raccourci à jour à chaque étape.
+   On passe sans cesse de STM à Raccourcis, et iOS peut recharger l'app entre-temps :
+   l'étape en cours est gardée sur l'appareil. */
+const CAL_GUIDE_KEY = 'stm-cal-guide';
 function openCalSetup() {
-  const step = (n, t) => `<div class="item"><span class="ico" style="--c:#fff"><span class="letter">${n}</span></span><div class="item-main" style="white-space:normal"><div class="item-title" style="white-space:normal;font-weight:500;line-height:1.35">${t}</div></div></div>`;
-  const k = s => `<b style="font-weight:650">${s}</b>`;
-  const steps = [
-    `Dans ${k('Calendrier')}, crée un calendrier iCloud nommé ${k('STM')}.`,
-    `Dans ${k('Raccourcis')}, crée un raccourci nommé exactement ${k(CAL_SHORTCUT)}.`,
-    `${k('Obtenir le dictionnaire de')} : Entrée du raccourci.`,
-    `${k('Rechercher des événements de calendrier')} : Calendrier est STM, et Date de début est après Aujourd'hui. Désactive la limite.`,
-    `${k('Supprimer les événements')} : Événements de calendrier.`,
-    `${k('Obtenir la valeur de')} la clé ${k('events')} dans Dictionnaire.`,
-    `${k('Répéter avec chaque élément')} de cette valeur. Tout ce qui suit va dans la boucle.`,
-    `Cinq fois ${k('Obtenir la valeur de')} dans Élément répété : ${k('days')}, ${k('hour')}, ${k('title')}, ${k('notes')}, ${k('alert')}. Renomme chaque résultat comme sa clé.`,
-    `${k('Ajuster la date')} : Obtenir le début du jour de Date actuelle.`,
-    `${k('Ajuster la date')} : Ajouter ${k('days')} jours à cette date, puis ${k('Ajuster la date')} : Ajouter ${k('hour')} heures. Renomme le résultat ${k('Début')}.`,
-    `${k('Ajuster la date')} : Ajouter 30 minutes à Début. Renomme le résultat ${k('Fin')}.`,
-    `${k('Si')} alert est ${k('week')} : ${k('Ajouter un nouvel événement')}. Titre = title, Calendrier STM, Début et Fin (pas « Journée entière »), Alerte 1 semaine avant, Remarques = notes.`,
-    `${k('Sinon')} : un second ${k('Si')} alert est ${k('day')} → la même action avec Alerte 1 jour avant. Son ${k('Sinon')} → la même action avec Alerte Au moment de l'événement.`
+  const v = s => `<span class="tk">${s}</span>`;   // variable à choisir
+  const t = s => `<span class="tx">${s}</span>`;   // texte à écrire
+  const b = s => `<b>${s}</b>`;                     // option d'un menu
+  const act = (n, name, find, rows = [], note = '') => `<div class="sc">
+    <div class="sc-head"><span class="sc-n">${n}</span><div><b>${name}</b><span class="sc-q">Cherche « ${find} »</span></div></div>
+    ${rows.map(([k, val]) => `<div class="sc-row"><span>${k}</span><span>${val}</span></div>`).join('')}
+    ${note ? `<p class="sc-note">${note}</p>` : ''}</div>`;
+  const KEYS = ['days', 'hour', 'title', 'notes', 'alert'];
+  /* Raccourci terminé, ligne par ligne : [étape où la ligne apparaît, profondeur, numéro, texte]. */
+  const PLAN = [
+    [2, 0, 1, `Obtenir le dictionnaire de ${v('Entrée du raccourci')}`],
+    [3, 0, 2, 'Rechercher des événements · Calendrier est STM'],
+    [3, 0, 3, `Supprimer ${v('Événements de calendrier')}`],
+    [4, 0, 4, `Obtenir la valeur pour ${t('events')} dans ${v('Dictionnaire')}`],
+    [4, 0, 5, `Répéter avec chaque élément de ${v('Valeur du dictionnaire')}`],
+    ...KEYS.flatMap((k, i) => [[5, 1, 6 + 2 * i, `Obtenir la valeur pour ${t(k)} dans ${v('Élément répété')}`], [5, 1, 7 + 2 * i, `Définir la variable ${t(k)}`]]),
+    [6, 1, 16, `Ajuster la date : début du jour de ${v('Date actuelle')}`],
+    [6, 1, 17, `Ajouter ${v('days')} jours à ${v('Date ajustée')}`],
+    [6, 1, 18, `Ajouter ${v('hour')} heures à ${v('Date ajustée')}`],
+    [6, 1, 19, `Définir la variable ${t('Début')}`],
+    [6, 1, 20, `Ajouter 30 minutes à ${v('Début')}`],
+    [6, 1, 21, `Définir la variable ${t('Fin')}`],
+    [7, 1, 22, `Si ${v('alert')} est ${t('week')}`],
+    [7, 2, 23, 'Ajouter un nouvel événement · 1 semaine avant'],
+    [7, 1, '', 'Sinon'],
+    [7, 2, 24, `Si ${v('alert')} est ${t('day')}`],
+    [7, 3, 25, 'Ajouter un nouvel événement · 1 jour avant'],
+    [7, 2, '', 'Sinon'],
+    [7, 3, 26, 'Ajouter un nouvel événement · au moment de l’événement'],
+    [7, 2, '', 'Fin du 2ᵉ « Si »'],
+    [7, 1, '', 'Fin du 1ᵉʳ « Si »'],
+    [4, 0, '', 'Fin de « Répéter »']
   ];
-  const sh = openSheet({
-    title: 'Connecter le calendrier', full: true,
-    body: `<p class="step-lead">${state.settings.calNeedsUpdate ? 'Le raccourci change : les rappels ont désormais une heure, pour que les alertes sonnent au bon moment. Refais-le avec ces étapes.' : 'STM envoie tes rappels à un raccourci qui les écrit dans ton Calendrier. À faire une seule fois.'}</p>
-      <div class="group">${steps.map((t, i) => step(i + 1, t)).join('')}</div>
-      <p class="hint" style="margin-top:14px;font-size:14.5px">À la première synchro, iOS demande l'accès au Calendrier et peut demander de confirmer la suppression des anciens rappels. Les noms des actions peuvent varier légèrement selon la version d'iOS.</p>`,
-    foot: `<button class="btn btn-primary" data-act="sheet" data-fn="ready">C'est prêt, synchroniser</button>`
+  const plan = k => {
+    let lines = PLAN.filter(l => l[0] <= k);
+    /* Aux étapes 6 et 7, les dix actions de lecture tiennent sur une ligne : le plan reste court. */
+    if (k === 6 || k === 7) {
+      const at = lines.findIndex(l => l[0] === 5);
+      lines = lines.filter(l => l[0] !== 5);
+      lines.splice(at, 0, [5, 1, '6–15', `Les 5 paires « Obtenir la valeur » et « Définir la variable » : ${KEYS.join(', ')}`]);
+    }
+    return `<h3 class="gd-h">${k < 8 ? 'Ton raccourci à ce stade' : 'Ton raccourci, en entier'}</h3>
+    <div class="sc-map${k === 8 ? ' all' : ''}">${lines.map(([p, d, n, h]) =>
+      `<div class="sc-l${p === k ? ' on' : ''}${n === '' ? ' mk' : ''}" style="--d:${d}"><span class="sc-ln">${n}</span><span>${h}</span></div>`).join('')}</div>`;
+  };
+  const row = (ic, t1, t2) => `<div class="item"><span class="ico">${icon(ic, 19)}</span><div class="item-main"><div class="item-title">${t1}</div><div class="item-sub">${t2}</div></div></div>`;
+  const needs = state.settings.calNeedsUpdate;
+  const steps = [
+    { title: 'Avant de commencer', body: () => `
+      <p class="step-lead">${needs ? 'Le raccourci a changé : les rappels ont maintenant une heure précise, pour que les alertes sonnent au bon moment. Il faut le refaire.' : 'Une web app ne peut pas écrire dans ton Calendrier. Un raccourci iOS le fait pour STM : tu le crées une fois, ensuite tout est automatique.'}</p>
+      <div class="group">${row('calendar', 'Un calendrier « STM »', '1 minute')}${row('repeat', 'Le raccourci « STM Calendrier »', '26 actions, environ 15 minutes')}${row('check', 'Un test', 'STM remplit ton calendrier')}</div>
+      <h3 class="gd-h">Les gestes dans Raccourcis</h3>
+      <div class="gd-list">
+        <p><b>Ajouter une action.</b> Touche la barre de recherche en bas, tape le mot indiqué ici, puis touche l’action. Elle se place tout en bas du raccourci.</p>
+        <p><b>La déplacer.</b> Maintiens-la, puis fais-la glisser. Dans un bloc (« Répéter », « Si »), les actions sont décalées vers la droite.</p>
+        <p><b>Remplir un champ.</b> Touche le mot en couleur dans l’action. ${t('texte')} : tu l’écris. ${v('variable')} : tu la choisis dans la barre au-dessus du clavier, ou avec « Sélectionner une variable ».</p>
+        <p><b>Te tromper.</b> Maintiens l’action en trop, puis « Supprimer ».</p>
+      </div>
+      <p class="hint" style="margin-top:16px">Tu vas passer de STM à Raccourcis : STM retient l’étape où tu en es.</p>
+      ${needs ? '' : `<button class="link-btn gd-skip" data-act="sheet" data-fn="ready">J’ai déjà le raccourci, synchroniser</button>`}` },
+
+    { title: 'Le calendrier STM', body: () => `
+      <p class="step-lead">Les rappels de STM vont dans un calendrier à part. Le raccourci ne touche jamais à tes autres événements.</p>
+      <ol class="gd-ol">
+        <li>Ouvre l’app ${b('Calendrier')}.</li>
+        <li>En bas, touche ${b('Calendriers')}, puis ${b('Ajouter un calendrier')}.</li>
+        <li>Nom : ${t('STM')}. Si on te demande un compte : ${b('iCloud')}.</li>
+        <li>Touche ${b('OK')}, puis reviens ici.</li>
+      </ol>` },
+
+    { title: 'Créer le raccourci', body: () => `
+      <ol class="gd-ol">
+        <li>Ouvre l’app ${b('Raccourcis')}, onglet ${b('Raccourcis')}, puis touche ${b('+')} en haut à droite.</li>
+        <li>Touche le nom en haut (« Nouveau raccourci »), puis ${b('Renommer')}.</li>
+        <li>Écris ce nom exactement, majuscules et espace compris :</li>
+      </ol>
+      <div class="gd-copy">${t(CAL_SHORTCUT)}<button class="btn btn-ghost btn-sm" data-act="sheet" data-fn="copy">Copier</button></div>
+      <h3 class="gd-h">Première action</h3>
+      ${act(1, 'Obtenir le dictionnaire de l’entrée', 'dictionnaire', [['Entrée', v('Entrée du raccourci')]], 'Le champ est en général déjà rempli. Si une ligne « Recevoir… » apparaît au-dessus, laisse-la telle quelle.')}
+      ${plan(2)}` },
+
+    { title: 'Effacer les anciens rappels', body: () => `
+      <p class="step-lead">Ces deux actions vident le calendrier STM avant d’y remettre les rappels à jour. Pas de doublons.</p>
+      ${act(2, 'Rechercher des événements', 'événements', [
+        ['Filtre', `${b('Calendrier')} · ${b('est')} · ${b('STM')}`],
+        ['2ᵉ filtre', `${b('Date de début')} · ${b('est après')} · ${v('Date actuelle')}`],
+        ['Limiter', b('désactivé')]
+      ], 'Touche « Ajouter un filtre », puis chaque mot du filtre pour le changer. Recommence pour le 2ᵉ filtre.')}
+      ${act(3, 'Supprimer les événements', 'supprimer les événements', [['Événements', v('Événements de calendrier')]], 'Le champ se remplit tout seul.')}
+      ${plan(3)}` },
+
+    { title: 'La boucle', body: () => `
+      <p class="step-lead">STM envoie une liste de rappels. Une boucle va les créer un par un.</p>
+      ${act(4, 'Obtenir la valeur du dictionnaire', 'valeur du dictionnaire', [['Obtenir', b('Valeur')], ['Clé', t('events')], ['Dans', v('Dictionnaire')]], 'Touche le dernier champ et choisis « Dictionnaire », le résultat de l’action 1.')}
+      ${act(5, 'Répéter avec chaque élément', 'répéter', [['Éléments', v('Valeur du dictionnaire')]], 'Pas « Répéter » tout court. Le bloc se ferme par une ligne « Fin » : tout ce qui suit va entre les deux.')}
+      ${plan(4)}` },
+
+    { title: 'Lire chaque rappel', body: () => `
+      <p class="step-lead">Chaque rappel contient 5 informations. Pour chaque mot, ajoute ces deux actions <b>dans la boucle</b>, juste au-dessus de sa ligne « Fin ».</p>
+      <div class="gd-keys">${KEYS.map(t).join('')}</div>
+      ${act('6', 'Obtenir la valeur du dictionnaire', 'valeur du dictionnaire', [['Clé', `le mot : ${t('days')}, puis ${t('hour')}…`], ['Dans', v('Élément répété')]], 'Touche le dernier champ et choisis « Élément répété ».')}
+      ${act('7', 'Définir la variable', 'définir la variable', [['Nom', 'le même mot'], ['Valeur', v('Valeur du dictionnaire')]], 'La valeur se remplit toute seule.')}
+      <p class="hint" style="margin-top:12px">Une paire par mot, dans l’ordre : actions 6 et 7 pour days, 8 et 9 pour hour… jusqu’à 15.</p>
+      ${plan(5)}` },
+
+    { title: 'Calculer la date', body: () => `
+      <p class="step-lead">Le rappel tombe dans ${t('days')} jours, à ${t('hour')} heures, et dure 30 minutes. Toujours dans la boucle, à la suite.</p>
+      ${act(16, 'Ajuster la date', 'ajuster la date', [['Opération', `touche ${b('Ajouter')}, choisis ${b('Obtenir le début du jour')}`], ['Date', v('Date actuelle')]])}
+      ${act(17, 'Ajuster la date', 'ajuster la date', [['Ajouter', `${v('days')} ${b('jours')}`], ['À', v('Date ajustée')]], '« Date ajustée » se remplit tout seul : c’est le résultat de l’action juste au-dessus.')}
+      ${act(18, 'Ajuster la date', 'ajuster la date', [['Ajouter', `${v('hour')} ${b('heures')}`], ['À', v('Date ajustée')]])}
+      ${act(19, 'Définir la variable', 'définir la variable', [['Nom', t('Début')]])}
+      ${act(20, 'Ajuster la date', 'ajuster la date', [['Ajouter', `${t('30')} ${b('minutes')}`], ['À', v('Début')]])}
+      ${act(21, 'Définir la variable', 'définir la variable', [['Nom', t('Fin')]])}
+      ${plan(6)}` },
+
+    { title: 'Créer l’événement', body: () => `
+      <p class="step-lead">Selon le rappel, l’alerte sonne une semaine avant, la veille ou à l’heure. Il faut donc trois fois la même action, avec une alerte différente.</p>
+      ${act(22, 'Si', 'si', [['Entrée', v('alert')], ['Condition', b('est')], ['Texte', t('week')]], 'Le bloc contient « Si », « Sinon » et une ligne de fin.')}
+      ${act(23, 'Ajouter un nouvel événement', 'nouvel événement', [
+        ['Titre', v('title')], ['Calendrier', b('STM')], ['Début', v('Début')], ['Fin', v('Fin')],
+        ['Journée entière', b('désactivé')], ['Alerte', b('1 semaine avant')], ['Remarques', v('notes')]
+      ], 'Place-la entre « Si » et « Sinon ». Touche la flèche de l’action pour voir Journée entière, Alerte et Remarques.')}
+      ${act(24, 'Si', 'si', [['Entrée', v('alert')], ['Condition', b('est')], ['Texte', t('day')]], 'Un 2ᵉ « Si », entre « Sinon » et la fin du 1ᵉʳ.')}
+      ${act(25, 'Ajouter un nouvel événement', 'nouvel événement', [['Comme la 23, sauf', `Alerte : ${b('1 jour avant')}`]], 'Entre le 2ᵉ « Si » et son « Sinon ».')}
+      ${act(26, 'Ajouter un nouvel événement', 'nouvel événement', [['Comme la 23, sauf', `Alerte : ${b('Au moment de l’événement')}`]], 'Entre le 2ᵉ « Sinon » et sa fin.')}
+      <p class="hint" style="margin-top:12px">Plus rapide : maintiens l’action 23, choisis « Dupliquer », fais glisser la copie à sa place et change seulement l’alerte.</p>
+      ${plan(7)}` },
+
+    { title: 'Vérifier et tester', body: () => {
+      const ev = calendarEvents()[0];
+      return `
+      <p class="step-lead">Reviens ici quand ton raccourci ressemble à ça.</p>
+      ${plan(8)}
+      <h3 class="gd-h">Le test</h3>
+      <ol class="gd-ol">
+        <li>Touche ${b('Synchroniser')} en bas. Raccourcis s’ouvre tout seul.</li>
+        <li>iOS demande l’accès au Calendrier : ${b('Autoriser')}. Il peut aussi demander de confirmer la suppression des anciens rappels : accepte.</li>
+        ${ev ? `<li>Ouvre Calendrier : le ${fmtDate(ev.date)}, tu dois voir « ${esc(ev.title)} ».</li>` : ''}
+      </ol>
+      <h3 class="gd-h">Ça ne marche pas ?</h3>
+      <div class="gd-list">
+        <p><b>« Raccourci introuvable ».</b> Vérifie le nom : ${t(CAL_SHORTCUT)}, exactement.</p>
+        <p><b>Rien dans le calendrier.</b> Les actions 6 à 26 doivent être décalées vers la droite, dans la boucle. Et « Calendrier » doit valoir STM dans les actions 23, 25 et 26.</p>
+        <p><b>Rappels à minuit ou sur toute la journée.</b> Désactive « Journée entière » dans les actions 23, 25 et 26.</p>
+        <p><b>Une confirmation à chaque synchro.</b> Dans Réglages › Apps › Raccourcis › Avancé, autorise la suppression sans confirmation.</p>
+      </div>`; } }
+  ];
+  const last = steps.length - 1;
+  const keep = n => { try { localStorage.setItem(CAL_GUIDE_KEY, String(n)); } catch (e) {} };
+  let step = 0;
+  try { step = Math.min(last, Math.max(0, parseInt(localStorage.getItem(CAL_GUIDE_KEY), 10) || 0)); } catch (e) {}
+  const sh = openSheet({ title: 'Connecter le calendrier', full: true, head: `<div class="steps" style="grid-template-columns:repeat(${last},1fr)">${'<i></i>'.repeat(last)}</div>`, body: '', foot: '<span></span>' });
+  const paint = (dir = 0) => {
+    keep(step);
+    $$('.steps i', sh).forEach((el, i) => el.classList.toggle('on', i < step));
+    /* Espaces insécables de la typographie française : pas de « ou de : seul en début de ligne. */
+    const html = `${step ? `<p class="gd-kick">Étape ${step} sur ${last}</p>` : ''}<h3 class="gd-title">${steps[step].title}</h3>${steps[step].body()}`
+      .replace(/« /g, '« ').replace(/ »/g, ' »').replace(/ ([:;?!])/g, ' $1');
+    setSheetBody(sh, html, dir);
+    $('.sheet-body', sh).scrollTop = 0;
+    $('.sheet-foot', sh).innerHTML = `${step ? `<button class="btn btn-ghost" data-act="sheet" data-fn="back">Retour</button>` : ''}<button class="btn btn-primary" data-act="sheet" data-fn="${step === last ? 'ready' : 'next'}">${step === last ? 'Synchroniser' : step ? 'Continuer' : 'Commencer'}</button>`;
+  };
+  sheetActions(sh, {
+    back() { step = Math.max(0, step - 1); paint(-1); },
+    next() { step = Math.min(last, step + 1); paint(1); },
+    copy() {
+      const ok = () => toast('Nom copié'), ko = () => toast('Copie impossible', 'close');
+      try { navigator.clipboard.writeText(CAL_SHORTCUT).then(ok, ko); } catch (e) { ko(); }
+    },
+    ready() {
+      try { localStorage.removeItem(CAL_GUIDE_KEY); } catch (e) {}
+      Object.assign(state.settings, { calReady: true, calShortcutV: CAL_SHORTCUT_V, calNeedsUpdate: false });
+      closeSheet(); syncCalendar();
+    }
   });
-  sheetActions(sh, { ready() { Object.assign(state.settings, { calReady: true, calShortcutV: CAL_SHORTCUT_V, calNeedsUpdate: false }); closeSheet(); syncCalendar(); } });
+  paint();
 }
 
 /* ---------- settings ---------- */

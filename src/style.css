@@ -179,6 +179,11 @@ input[type=date]::-webkit-date-and-time-value,input[type=month]::-webkit-date-an
 .input:focus-visible{outline:none}
 .money.sm .input{font-size:24px;height:56px}
 .money.sm::after{font-size:19px}
+/* bouton ± des montants qui peuvent être négatifs */
+.money.signed .input{padding-left:54px}
+.money-sign{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;background:var(--s3);color:var(--t2);display:grid;place-items:center;z-index:1;transition:background-color .2s,color .2s,transform .18s var(--ease)}
+.money-sign:active{transform:translateY(-50%) scale(.9)}
+.money-sign[aria-pressed=true]{background:var(--t1);color:#000}
 
 /* ---------- sheets ---------- */
 .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);opacity:0;transition:opacity .35s;z-index:40}
@@ -353,3 +358,42 @@ span.odo,.odo span{font-size:inherit;color:inherit;opacity:1;font-weight:inherit
 .confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:130}
 .swipe>.item.dim{opacity:1}
 .swipe>.item.dim>*{opacity:.5}
+
+/* guide du raccourci calendrier */
+.gd-kick{margin:2px 4px 0;font-size:13.5px;color:var(--t2);font-weight:560}
+.gd-title{margin:2px 4px 10px;font-size:25px;line-height:1.1;font-weight:720;font-stretch:88%;letter-spacing:-.015em}
+.gd-h{margin:26px 4px 10px;font-size:17px;font-weight:700;font-stretch:90%}
+.gd-list{display:grid;gap:12px;margin:0 4px}
+.gd-list p{margin:0;font-size:15px;line-height:1.45;color:var(--t2)}
+.gd-list b{color:var(--t1);font-weight:620}
+.gd-ol{margin:0;padding:0 4px 0 26px;display:grid;gap:12px;font-size:15.5px;line-height:1.45}
+.gd-ol li{padding-left:4px}
+.gd-ol li::marker{color:var(--t3);font-weight:650}
+.gd-ol b,.sc b,.sc-map b,.step-lead b{font-weight:640;color:var(--t1)}
+.gd-copy{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--s1);border-radius:16px;padding:10px 10px 10px 14px;margin-top:12px}
+.gd-copy .tx{font-size:18px;padding:2px 9px}
+.gd-skip{display:block;margin:22px auto 4px}
+.gd-keys{display:flex;flex-wrap:wrap;gap:8px;margin:0 4px 4px}
+.gd-keys .tx{font-size:16px;padding:3px 10px}
+.tk,.tx{display:inline-block;border-radius:7px;color:var(--t1);font-weight:600;white-space:nowrap;line-height:1.45;padding:0 6px}
+.tk{background:rgba(255,255,255,.15)}
+.tx{box-shadow:inset 0 0 0 1px rgba(255,255,255,.34)}
+.sc{background:var(--s1);border-radius:18px;padding:12px 14px;margin-top:10px}
+.sc-head{display:flex;gap:12px;align-items:center}
+.sc-head b{display:block;font-size:16px;font-weight:650;line-height:1.25}
+.sc-n{flex:none;min-width:30px;height:30px;padding:0 6px;border-radius:15px;background:var(--s3);display:grid;place-items:center;font-weight:700;font-size:14px}
+.sc-q{display:block;font-size:13.5px;color:var(--t2);margin-top:2px}
+.sc-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:15px}
+.sc-row>span:first-child{color:var(--t2);flex:none}
+.sc-row>span:last-child{text-align:right;min-width:0}
+.sc-note{margin:9px 0 0;font-size:13.5px;line-height:1.4;color:var(--t2)}
+.sc-map{background:var(--s1);border-radius:18px;padding:8px 12px 8px 6px;font-size:13.5px;line-height:1.35}
+/* une ligne par action ; dans un bloc, le texte est décalé et des filets montrent l'imbrication */
+.sc-l{display:flex;gap:8px;align-items:baseline;opacity:.42}
+.sc-l>span{padding:5px 0}
+.sc-l>span:last-child{flex:1;min-width:0;padding-left:calc(var(--d) * 16px);
+  background:repeating-linear-gradient(90deg,var(--s3) 0 2px,transparent 2px 16px) 2px 0/calc(var(--d) * 16px) 100% no-repeat}
+.sc-l.on,.sc-map.all .sc-l{opacity:1}
+.sc-ln{flex:none;width:30px;text-align:right;color:var(--t3);font-weight:650;font-size:12.5px;white-space:nowrap}
+.sc-l.mk>span:last-child{color:var(--t3);font-weight:600}
+.sc-l .tk,.sc-l .tx{padding:0 5px;border-radius:6px}
