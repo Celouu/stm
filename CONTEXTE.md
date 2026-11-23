@@ -25,7 +25,8 @@ Le dépôt est public : aucune donnée personnelle dans le code, les tests ou ce
 
 ## Code
 - `src/` : `style.css`, `index.html` (gabarit) et les scripts JS numérotés de `1-core` à `8-gestures`, concaténés dans un seul bloc.
-- `python3 build.py` produit `dist/` (index.html, sw.js, manifest, icônes PNG générées sans dépendance).
+- `python3 build.py` produit `dist/` (index.html, sw.js, manifest, icônes PNG générées sans dépendance). `dist/` n'est pas versionné.
+- Publication : chaque push sur `main` lance `.github/workflows/pages.yml` (tests unitaires, build, mise en ligne de `dist/` sur GitHub Pages). Monter `APP_VERSION` à chaque version pour renouveler le cache du service worker.
 - Modèle de données (schéma v2, `migrate()` convertit le v1) :
   - `flows` : `hist[{from, amount, pause, employer, freq, month}]`. Chaque entrée s'applique à partir de son mois : changer un montant, la part employeur ou la fréquence ne réécrit jamais les mois passés. `end` pour un flux résilié.
   - `oneoffs`, `goals` (`moves`), `debts` (`moves`), `contracts` (`files` dans IndexedDB).

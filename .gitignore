@@ -5,6 +5,9 @@ CONTEXTE.local.md
 stm-sauvegarde-*.json
 *.json.bak
 
+# Appli construite par build.py (publiée par GitHub Actions)
+dist/
+
 # Sorties des tests
 test/shots/
 test/*.json
