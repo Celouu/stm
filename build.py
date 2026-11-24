@@ -70,12 +70,15 @@ html = (src/'index.html').read_text().replace('{{CSS}}', css).replace('{{JS}}', 
 # ---------- service worker ----------
 # La page est indispensable ; les icônes et le manifeste sont mis en cache au mieux,
 # pour qu'un fichier manquant n'empêche plus toute l'installation hors ligne.
+# GitHub Pages autorise 10 min de cache navigateur : sans `cache: 'reload'` / `'no-cache'`,
+# une nouvelle version pourrait mettre en cache l'ancienne page.
 (dist/'sw.js').write_text(f"""const CACHE = 'stm-{version}';
 const CORE = ['./', './index.html'];
 const EXTRA = ['./manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
+const net = u => new Request(u, {{ cache: 'reload' }});
 self.addEventListener('install', e => {{
   e.waitUntil(caches.open(CACHE)
-    .then(c => c.addAll(CORE).then(() => Promise.all(EXTRA.map(a => c.add(a).catch(() => {{}})))))
+    .then(c => c.addAll(CORE.map(net)).then(() => Promise.all(EXTRA.map(a => c.add(net(a)).catch(() => {{}})))))
     .then(() => self.skipWaiting()));
 }});
 self.addEventListener('activate', e => {{ e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); }});
@@ -85,7 +88,7 @@ self.addEventListener('fetch', e => {{
   if (url.origin !== location.origin) return;
   e.respondWith(caches.open(CACHE).then(async c => {{
     const cached = await c.match(e.request, {{ ignoreSearch: true }});
-    const fresh = fetch(e.request).then(r => {{ if (r.ok) c.put(e.request, r.clone()); return r; }}).catch(() => cached);
+    const fresh = fetch(e.request.url, {{ cache: 'no-cache' }}).then(r => {{ if (r.ok) c.put(e.request, r.clone()); return r; }}).catch(() => cached);
     return cached || fresh;
   }}));
 }});

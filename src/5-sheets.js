@@ -28,6 +28,21 @@ function readRemind(sh) {
   return { on: true, alert: segVal(sh, 'remindAlert') };
 }
 const calConnectBtn = () => state.settings.calReady ? '' : `<button type="button" class="btn btn-ghost btn-block" data-act="calSetup">${icon('calendar', 20)}Connecter le calendrier</button>`;
+/* « Paiement automatique » des charges et des remboursements de dettes : activé par défaut.
+   Désactivé, chaque échéance s'affiche dans « À payer » sur l'écran Mois. */
+function autoBlock(on) {
+  return `<div class="field"><div class="group"><div class="setting"><span class="ico">${icon('repeat', 19)}</span><span class="grow">Paiement automatique</span><button type="button" class="switch" role="switch" data-sw="auto" aria-checked="${on}" aria-label="Paiement automatique"></button></div></div>
+    <p class="hint" data-auto-hint ${on ? 'hidden' : ''}>Rappel dans « À payer » sur l'écran Mois.</p></div>`;
+}
+const readAuto = sh => { const sw = $('[data-sw="auto"]', sh); return !sw || sw.getAttribute('aria-checked') === 'true'; };
+function wireAuto(sh, onChange) {
+  sh.addEventListener('click', e => {
+    if (!e.target.closest('[data-sw="auto"]')) return;
+    $('[data-auto-hint]', sh).hidden = readAuto(sh);
+    if (onChange) onChange(readAuto(sh));
+  });
+}
+const dayLbl = (kind, auto) => kind === 'in' ? 'Jour du versement' : auto ? 'Jour du prélèvement' : "Jour de l'échéance";
 
 /* ---------- flow ---------- */
 function openFlow(id, opts = {}) {
@@ -39,13 +54,15 @@ function openFlow(id, opts = {}) {
   const t0 = f ? flowTerms(f, atYm) : { freq: 'm', month: ymParts(atYm)[1], employer: 0 };
   const st0 = f ? flowStatus(f, atYm) : 'active';
   const linked = f ? state.contracts.filter(c => c.flow === f.id) : [];
+  const auto0 = !f || f.auto !== false;
   const body = `
     ${isNew ? `<div class="field">${seg('kind', [['in', 'Revenu'], ['out', 'Charge']], kind)}</div>` : ''}
     <label class="field"><span class="lbl">Nom</span><input class="input" name="name" value="${esc(f ? f.name : '')}" placeholder="${kind === 'in' ? 'Salaire, aide…' : 'Loyer, transport…'}" autocomplete="off" enterkeyhint="done"></label>
     <div class="field"><span class="lbl">Montant</span>${moneyField('amount', cur)}</div>
     <div class="field"><span class="lbl">Fréquence</span>${seg('freq', [['m', 'Mensuel'], ['q', 'Trimestriel'], ['y', 'Annuel']], t0.freq)}</div>
     <label class="field" data-show="month" ${t0.freq === 'm' ? 'hidden' : ''}><span class="lbl">Mois de paiement</span><select class="input" name="month">${monthOptions(t0.month || ymParts(atYm)[1])}</select></label>
-    <label class="field"><span class="lbl" data-daylbl>${kind === 'in' ? 'Jour du versement' : 'Jour du prélèvement'}</span><select class="input" name="day"><option value="">Pas précisé</option>${dayOptions(f ? f.day : null)}</select></label>
+    <div data-show="auto" ${kind === 'in' ? 'hidden' : ''}>${autoBlock(auto0)}</div>
+    <label class="field"><span class="lbl" data-daylbl>${dayLbl(kind, auto0)}</span><select class="input" name="day"><option value="">Pas précisé</option>${dayOptions(f ? f.day : null)}</select></label>
     <div class="field"><span class="lbl">Catégorie</span><div data-catwrap>${chipsCats('cat', kind, f ? f.cat : catList(kind)[0].id)}</div></div>
     <div class="field" data-show="employer" ${kind === 'in' ? 'hidden' : ''}><span class="lbl">Part payée par l'employeur</span>
       <div class="row2"><div class="suffix" data-suffix="%"><input class="input" name="employer" inputmode="decimal" value="${t0.employer ? plainNum(t0.employer) : ''}" placeholder="0"></div><div class="input" data-net style="display:flex;align-items:center;color:var(--t2);font-size:15px"></div></div></div>
@@ -81,13 +98,15 @@ function openFlow(id, opts = {}) {
   sh.addEventListener('input', upd);
   sh.addEventListener('change', upd);
   wireRemind(sh);
+  wireAuto(sh, a => { $('[data-daylbl]', sh).textContent = dayLbl(kind, a); });
   sh.addEventListener('segchange', e => {
     if (e.detail.name === 'kind') {
       kind = e.detail.value;
       $('[data-catwrap]', sh).innerHTML = chipsCats('cat', kind, catList(kind)[0].id); wireControls($('[data-catwrap]', sh));
       $('[data-show="employer"]', sh).hidden = kind === 'in';
+      $('[data-show="auto"]', sh).hidden = kind === 'in';
       $('[name="name"]', sh).placeholder = kind === 'in' ? 'Salaire, aide…' : 'Loyer, transport…';
-      $('[data-daylbl]', sh).textContent = kind === 'in' ? 'Jour du versement' : 'Jour du prélèvement';
+      $('[data-daylbl]', sh).textContent = dayLbl(kind, readAuto(sh));
     }
     if (e.detail.name === 'freq') $('[data-show="month"]', sh).hidden = e.detail.value === 'm';
     upd();
@@ -102,9 +121,13 @@ function openFlow(id, opts = {}) {
       if (!requireField(sh, 'amount', status !== 'active' || (r.amount > 0), 'Indique un montant')) return;
       const from = fieldVal(sh, 'from') || ymNow();
       const terms = { amount: r.amount > 0 ? r.amount : cur, employer: r.employer, freq: r.freq, month: r.month };
-      const remind = readRemind(sh), day = +fieldVal(sh, 'day') || null;
+      const remind = readRemind(sh), day = +fieldVal(sh, 'day') || null, auto = kind === 'in' || readAuto(sh);
       if (!requireField(sh, 'day', !remind || day, 'Indique le jour du paiement pour le rappel')) return;
-      const common = { name, cat: chipVal(sh, 'cat'), due: fieldVal(sh, 'due') || null, day, remind };
+      if (!requireField(sh, 'day', auto || day, "Indique le jour de l'échéance")) return;
+      /* Passage en paiement manuel : les échéances sont réclamées à partir de ce mois-ci. */
+      const wasManual = f && f.auto === false;
+      const common = { name, cat: chipVal(sh, 'cat'), due: fieldVal(sh, 'due') || null, day, remind, auto,
+        manualFrom: auto ? null : (wasManual && f.manualFrom) || ymNow(), paid: auto ? null : (wasManual && f.paid) || null };
       if (isNew) {
         state.flows.push({ id: uid(), kind, ...common, hist: [{ from, ...terms, pause: false }], end: null });
       } else {
@@ -355,43 +378,102 @@ function openPlacement(id) {
 }
 
 /* ---------- debt ---------- */
+const PLAN_FREQS = [['none', 'Aucun'], ['once', 'Une fois'], ['m', 'Chaque mois']];
 function openDebt(id) {
   const d = id ? state.debts.find(x => x.id === id) : null;
   const paint = () => {
     if (d) ensureIds(d.moves);
-    const dir = d ? d.dir : 'owe';
+    const dir = d ? d.dir : 'owe', p = d && d.plan, freq = p ? p.freq : 'none';
     return `<div class="field">${seg('dir', [['owe', 'Je dois'], ['owed', 'On me doit']], dir)}</div>
     <label class="field"><span class="lbl">Personne</span><input class="input" name="who" value="${esc(d ? d.who : '')}" autocomplete="off"></label>
     <div class="field"><span class="lbl">Montant</span>${moneyField('amount', d ? d.amount : null)}</div>
     <div class="row2"><label class="field"><span class="lbl">Depuis</span><input class="input" type="month" name="ym" value="${d ? d.ym : ymNow()}"></label>
     <label class="field" data-show="plc" ${dir === 'owed' || !state.placements.length ? 'hidden' : ''}><span class="lbl">Placé sur</span><select class="input" name="placement"><option value="">Aucun</option>${state.placements.map(p => `<option value="${p.id}" ${d && d.placement === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label></div>
+    <div class="field" style="margin-top:8px"><span class="lbl" data-plan-lbl>${dir === 'owe' ? 'Remboursement prévu' : 'Remboursement attendu'}</span>${seg('planFreq', PLAN_FREQS, freq)}</div>
+    <div data-plan ${freq === 'none' ? 'hidden' : ''}>
+      <div class="field"><span class="lbl" data-plan-amt>${freq === 'm' ? 'Par mois' : 'Montant'}</span>${moneyField('planAmount', p ? p.amount : null, '0', 'sm')}</div>
+      <label class="field" data-plan-once ${freq === 'once' ? '' : 'hidden'}><span class="lbl">Le</span><input class="input" type="date" name="planDate" value="${p && p.date ? p.date : todayISO()}"></label>
+      <div class="row2" data-plan-m ${freq === 'm' ? '' : 'hidden'}>
+        <label class="field"><span class="lbl">Le</span><select class="input" name="planDay">${dayOptions(p && p.day ? p.day : 5)}</select></label>
+        <label class="field"><span class="lbl">À partir de</span><input class="input" type="month" name="planFrom" value="${p && p.from ? p.from : ymNow()}"></label>
+      </div>
+      <p class="hint" data-plan-sum style="margin:-6px 4px 16px"></p>
+      <div data-show="auto" ${dir === 'owed' ? 'hidden' : ''}>${autoBlock(!p || p.auto !== false)}</div>
+      ${remindBlock(p && p.remind)}
+    </div>
     ${d ? `<div class="sec" style="margin-top:16px"><div class="sec-head"><h3 class="sec-title" style="font-size:17px">Remboursements</h3><span class="sec-aside">Reste ${money(Math.max(0, debtLeft(d)))}</span></div>
       <div class="bar"><i style="width:${Math.min(100, (d.amount - debtLeft(d)) / d.amount * 100)}%;--c:${d.dir === 'owe' ? 'var(--out)' : 'var(--in)'}"></i></div>
       ${movesList(sortByYm(d.moves.slice()).reverse(), m => ({ title: 'Remboursé', amt: money(m.amount) }))}
       ${miniForm('', 'Ajouter un remboursement')}</div>${dangerBtn('Supprimer la dette')}` : ''}`;
   };
   const sh = openSheet({ title: d ? (d.dir === 'owe' ? `Je dois à ${d.who}` : `${d.who} me doit`) : 'Nouvelle dette', body: paint(), foot: primary('Enregistrer') });
-  sh._refresh = () => setSheetBody(sh, paint());
-  sh.addEventListener('segchange', e => { if (e.detail.name === 'dir') { const el = $('[data-show="plc"]', sh); if (el) el.hidden = e.detail.value === 'owed' || !state.placements.length; } });
+  /* Remboursement prévu tel qu'il est saisi (null si « Aucun »). */
+  const readPlan = () => {
+    const freq = segVal(sh, 'planFreq');
+    if (!freq || freq === 'none') return null;
+    const p = { freq, amount: parseAmount(fieldVal(sh, 'planAmount')), remind: readRemind(sh) };
+    /* Je rembourse moi-même : chaque échéance va dans « À payer », à partir de ce mois-ci. */
+    if (segVal(sh, 'dir') === 'owe' && !readAuto(sh)) { p.auto = false; p.manualFrom = (d && d.plan && d.plan.auto === false && d.plan.manualFrom) || ymNow(); }
+    if (freq === 'once') p.date = fieldVal(sh, 'planDate');
+    else { p.day = +fieldVal(sh, 'planDay') || 1; p.from = fieldVal(sh, 'planFrom') || ymNow(); }
+    return p;
+  };
+  /* Résumé sous le formulaire : combien de versements, quand la dette est soldée. */
+  const summary = () => {
+    const el = $('[data-plan-sum]', sh); if (!el) return;
+    const p = readPlan(), amount = parseAmount(fieldVal(sh, 'amount')), moves = d ? d.moves : [];
+    if (!p || !(p.amount > 0) || !(amount > 0)) { el.textContent = ''; return; }
+    const occ = debtPlanned({ amount, moves, plan: p }, ymAdd(ymNow(), 120));
+    const left = r2(debtLeft({ amount, moves }) - sum(occ, o => o.amount)), last = occ[occ.length - 1];
+    el.textContent = !occ.length ? 'Rien à prévoir : la dette est soldée, ou ce mois est déjà clôturé ou remboursé.'
+      : p.freq === 'once' ? (left > 0 ? `Il restera ${money(left)} à rembourser.` : 'La dette sera soldée.')
+      : left > 0 ? `${occ.length} versements, et il restera ${money(left)}.`
+      : `${occ.length} versement${occ.length > 1 ? 's' : ''}, soldée le ${fmtDate(last.date)}${last.amount < p.amount ? ` (dernier : ${money(last.amount)})` : ''}.`;
+  };
+  const repaint = () => { setSheetBody(sh, paint()); summary(); };
+  sh._refresh = repaint;
+  wireRemind(sh);
+  wireAuto(sh);
+  sh.addEventListener('input', summary);
+  sh.addEventListener('change', summary);
+  sh.addEventListener('segchange', e => {
+    const { name, value } = e.detail;
+    if (name === 'dir') {
+      const el = $('[data-show="plc"]', sh); if (el) el.hidden = value === 'owed' || !state.placements.length;
+      $('[data-show="auto"]', sh).hidden = value === 'owed';
+      $('[data-plan-lbl]', sh).textContent = value === 'owe' ? 'Remboursement prévu' : 'Remboursement attendu';
+    }
+    if (name === 'planFreq') {
+      $('[data-plan]', sh).hidden = value === 'none';
+      $('[data-plan-once]', sh).hidden = value !== 'once';
+      $('[data-plan-m]', sh).hidden = value !== 'm';
+      $('[data-plan-amt]', sh).textContent = value === 'm' ? 'Par mois' : 'Montant';
+    }
+    summary();
+  });
+  summary();
   sheetActions(sh, {
     save() {
       const who = fieldVal(sh, 'who'), amount = parseAmount(fieldVal(sh, 'amount'));
       if (!requireField(sh, 'who', who, 'Indique la personne')) return;
       if (!requireField(sh, 'amount', amount > 0, 'Indique un montant')) return;
+      const plan = readPlan();
+      if (plan && !requireField(sh, 'planAmount', plan.amount > 0, 'Indique le montant prévu')) return;
+      if (plan && plan.freq === 'once' && !requireField(sh, 'planDate', plan.date, 'Choisis la date du remboursement')) return;
       const dir = segVal(sh, 'dir');
-      const data = { who, amount, dir, ym: fieldVal(sh, 'ym') || ymNow(), placement: dir === 'owe' ? (fieldVal(sh, 'placement') || null) : null };
+      const data = { who, amount, dir, ym: fieldVal(sh, 'ym') || ymNow(), placement: dir === 'owe' ? (fieldVal(sh, 'placement') || null) : null, plan };
       if (d) Object.assign(d, data); else state.debts.push({ id: uid(), ...data, moves: [] });
-      save(); closeSheet(); refresh(); toast(d ? 'Dette enregistrée' : 'Dette ajoutée');
+      save(); closeSheet(); refresh(); toast(d ? 'Dette enregistrée' : 'Dette ajoutée'); calMaybeSync();
     },
     addMove() {
       const a = parseAmount(fieldVal(sh, 'mvAmount')), ym = fieldVal(sh, 'mvYm') || ymNow();
       if (!requireField(sh, 'mvAmount', a > 0, 'Indique un montant')) return;
-      d.moves.push({ id: uid(), ym, amount: a }); save(); setSheetBody(sh, paint()); render(false);
+      d.moves.push({ id: uid(), ym, amount: a }); save(); repaint(); render(false); calMaybeSync();
     },
-    rmMove(el) { d.moves = d.moves.filter(m => m.id !== el.dataset.id); save(); setSheetBody(sh, paint()); render(false); },
+    rmMove(el) { d.moves = d.moves.filter(m => m.id !== el.dataset.id); save(); repaint(); render(false); calMaybeSync(); },
     async del() {
       if (!(await confirmSheet('Supprimer cette dette et ses remboursements ?', 'Supprimer', true))) return;
-      state.debts = state.debts.filter(x => x !== d); save(); closeSheet(); refresh(); toast('Dette supprimée', 'trash');
+      state.debts = state.debts.filter(x => x !== d); save(); closeSheet(); refresh(); toast('Dette supprimée', 'trash'); calMaybeSync();
     }
   });
 }

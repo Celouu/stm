@@ -232,6 +232,92 @@ test('point solde : épargne prévue du mois pas encore faite', () => {
   eq(run(`pulse('2026-11-23')`).free, 600, 'épargne déjà faite');
 });
 
+const debt = (plan, extra = {}) => ({ id: 'd', who: 'Paul', dir: 'owe', amount: 250, ym: '2026-11', placement: null, moves: [], plan, ...extra });
+const spaces = s => s.replace(/\s/g, ' ');
+test('dette : remboursement mensuel prévu jusqu’à ce qu’elle soit soldée', () => {
+  set('debts', [debt({ freq: 'm', amount: 100, day: 31, from: '2027-01' })]);
+  eq(run(`debtPlanned(state.debts[0])`), [{ date: '2027-01-31', ym: '2027-01', amount: 100 }, { date: '2027-02-28', ym: '2027-02', amount: 100 }, { date: '2027-03-31', ym: '2027-03', amount: 50 }]);
+  run(`state.debts[0].moves.push({ ym: '2027-01', amount: 120 })`);
+  eq(run(`debtPlanned(state.debts[0])`).map(o => [o.ym, o.amount]), [['2027-02', 100], ['2027-03', 30]], 'mois déjà remboursé sauté');
+  run(`state.months['2027-02'] = { closed: '2027-03-01T00:00:00Z', balance: null }`);
+  eq(run(`debtPlanned(state.debts[0])`).map(o => [o.ym, o.amount]), [['2027-03', 100], ['2027-04', 30]], 'mois clôturé sans remboursement : la suite décale');
+});
+
+test('dette : remboursement prévu une fois, compté dans le mois puis à la clôture', () => {
+  set('debts', [debt({ freq: 'once', amount: 400, date: '2027-02-10' })]);
+  eq(run(`debtPlanned(state.debts[0])`), [{ date: '2027-02-10', ym: '2027-02', amount: 250 }], 'plafonné à ce qui reste dû');
+  eq(run(`monthSummary('2027-02')`).out.map(x => [x.name, x.amount, x.planned]), [['Remboursement à Paul', 250, true]]);
+  eq(run(`debtPlannedIn(state.debts[0], '2027-02')`), 250, 'proposé à la clôture');
+  run(`state.debts[0].moves.push({ ym: '2027-02', amount: 250, src: 'close' }); state.months['2027-02'] = { closed: '2027-03-01T00:00:00Z', balance: null }`);
+  eq(run(`monthSummary('2027-02')`).out.map(x => [x.amount, !!x.planned]), [[250, false]], 'fait : compté une seule fois');
+  set('debts', [debt({ freq: 'once', amount: 50, date: '2027-03-10' }, { dir: 'owed' })]);
+  eq(run(`monthSummary('2027-03')`).inc.map(x => [x.name, x.amount]), [['Remboursement de Paul', 50]], 'on me rembourse : une entrée');
+});
+
+test('dette : remboursement prévu dans le point solde et le calendrier', () => {
+  set('flows', [salaire(28)]);
+  set('balances', [{ date: '2026-11-23', amount: 600 }]);
+  set('debts', [debt({ freq: 'm', amount: 100, day: 25, from: '2026-11', remind: { on: true, alert: 'day' } })]);
+  const p = run(`pulse('2026-11-23')`);
+  eq([p.items.map(x => [x.date, x.name, x.amount]), p.free], [[['2026-11-25', 'Remboursement à Paul', -100]], 500]);
+  const ev = run(`calendarEvents('2026-11-23')`).filter(e => e.title.startsWith('Rembourser'));
+  eq(ev.map(e => [e.date, spaces(e.title), spaces(e.notes), e.alert]), [
+    ['2026-11-25', 'Rembourser Paul : 100,00 €', 'Reste dû après : 150,00 €', 'day'],
+    ['2026-12-25', 'Rembourser Paul : 100,00 €', 'Reste dû après : 50,00 €', 'day'],
+    ['2027-01-25', 'Rembourser Paul : 50,00 €', 'Reste dû après : 0,00 €', 'day']]);
+  run(`state.debts[0].plan.remind = null`);
+  eq(run(`calendarEvents('2026-11-23')`).some(e => e.title.startsWith('Rembourser')), false, 'sans rappel : rien dans le calendrier');
+});
+
+const manual = (amount, day, extra = {}) => flow('out', amount, {}, { id: 'm', name: 'Loyer', day, auto: false, manualFrom: '2026-11', ...extra });
+const dues = today => run(`toPayList('${today}')`).map(x => [x.date, x.amount, x.paid]);
+test('à payer : charge sans paiement automatique, en retard puis payée', () => {
+  set('flows', [manual(500, 5), flow('out', 15, {}, { name: 'Box', day: 30 }), flow('out', 40, {}, { auto: false })]);
+  eq(dues('2026-11-24'), [['2026-11-05', 500, null], ['2026-12-05', 500, null]], 'en retard et dans le mois qui vient ; automatique ou sans jour : rien');
+  run(`setPaid('flow', 'm', '2026-11', true, '2026-11-24')`);
+  eq(dues('2026-11-24'), [['2026-12-05', 500, null]], 'payée et passée : plus affichée');
+  run(`setPaid('flow', 'm', '2026-12', true, '2026-11-24')`);
+  eq(dues('2026-11-24'), [['2026-12-05', 500, '2026-11-24']], 'payée en avance : reste affichée, cochée');
+  run(`setPaid('flow', 'm', '2026-11', false); state.months['2026-11'] = { closed: '2026-12-01T00:00:00Z', balance: null }`);
+  eq(dues('2026-11-24'), [['2026-12-05', 500, '2026-11-24']], 'mois clôturé : fait');
+  set('flows', [manual(500, 5, { manualFrom: '2026-12' })]);
+  eq(dues('2026-11-24'), [['2026-12-05', 500, null]], 'rien de réclamé avant le passage en manuel');
+});
+
+test('à payer : point solde et calendrier', () => {
+  set('flows', [salaire(28), manual(500, 5, { remind: { on: true, alert: 'day' } }), flow('out', 30, {}, { name: 'Box', day: 25 })]);
+  set('balances', [{ date: '2026-11-23', amount: 1000 }]);
+  eq(run(`pulse('2026-11-23')`).items.map(x => [x.date, x.name, x.amount]), [['2026-11-05', 'Loyer', -500], ['2026-11-25', 'Box', -30]], 'en retard et pas payée : encore à passer');
+  run(`state.flows[1].paid = { '2026-11': '2026-11-20' }`);
+  eq(run(`pulse('2026-11-23')`).free, 970, 'payée avant le point solde : déjà dans le solde');
+  run(`state.flows[1].paid = { '2026-11': '2026-11-24' }`);
+  eq(run(`pulse('2026-11-23')`).free, 470, 'payée après le point solde : pas encore dans le solde');
+  set('balances', [{ date: '2026-11-23', t: '2026-11-23T09:00:00.000Z', amount: 1000 }]);
+  run(`state.flows[1].paid = { '2026-11': '2026-11-23T10:00:00.000Z' }`);
+  eq(run(`pulse('2026-11-23')`).free, 470, 'cochée le même jour, après le point solde : encore comptée');
+  run(`state.flows[1].paid = { '2026-11': '2026-11-23T08:00:00.000Z' }`);
+  eq(run(`pulse('2026-11-23')`).free, 970, 'cochée le même jour, avant le point solde : déjà dans le solde');
+  const loyer = () => run(`calendarEvents('2026-11-23')`).filter(e => e.title.startsWith('Loyer')).slice(0, 2).map(e => [e.date, e.notes]);
+  eq(loyer(), [['2026-12-05', 'À payer'], ['2027-01-05', 'À payer']]);
+  run(`setPaid('flow', 'm', '2026-12', true, '2026-11-23')`);
+  eq(loyer()[0], ['2027-01-05', 'À payer'], 'payée en avance : plus de rappel');
+});
+
+test('à payer : remboursement de dette fait soi-même', () => {
+  set('debts', [debt({ freq: 'm', amount: 100, day: 25, from: '2026-11', auto: false, manualFrom: '2026-11' })]);
+  eq(dues('2026-11-24'), [['2026-11-25', 100, null]], 'seulement la prochaine échéance');
+  eq(run(`upcoming(4000)`).some(u => u.open[0] === 'debt'), false, 'pas en double dans « À venir »');
+  run(`setPaid('debt', 'd', '2026-11', true, '2026-11-24')`);
+  eq(run(`state.debts[0].moves`).map(m => [m.ym, m.amount, m.src, m.date, m.due]), [['2026-11', 100, 'pay', '2026-11-24', '2026-11-25']], 'un remboursement est enregistré');
+  eq(dues('2026-11-24'), [['2026-12-25', 100, null], ['2026-11-25', 100, '2026-11-24']], 'payée en bas de la liste');
+  eq(run(`monthSummary('2026-11')`).out.map(x => [x.amount, !!x.planned]), [[100, false]], 'compté une seule fois');
+  eq(run(`debtPlannedIn(state.debts[0], '2026-11')`), 0, 'rien de plus proposé à la clôture');
+  run(`setPaid('debt', 'd', '2026-11', false)`);
+  eq([run(`state.debts[0].moves.length`), dues('2026-11-24')], [0, [['2026-11-25', 100, null]]], 'annulé');
+  run(`state.debts[0].plan.auto = undefined`);
+  eq(dues('2026-11-24'), [], 'paiement automatique : rien à payer');
+});
+
 test('je peux me le permettre ?', () => {
   set('flows', [salaire(28), flow('out', 500, {}, { name: 'Loyer', day: 5 })]);
   set('goals', [{ id: 'g', name: 'Permis', target: 1000, plan: 100, moves: [] }]);

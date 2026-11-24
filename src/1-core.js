@@ -1,5 +1,5 @@
 /* ============ STM — Save the Moula ============ */
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.6.2';
 const SCHEMA = 2;
 
 /* ---------- utils ---------- */
@@ -257,6 +257,34 @@ function placementBreakdown(p) {
   return { me, abond, third, out, value, start, gain: r2(value - (start + me + abond + third - out)) };
 }
 const debtLeft = d => r2(d.amount - sum(d.moves, m => m.amount));
+/* Remboursements prévus d'une dette (`d.plan`) :
+   - `{ freq: 'once', amount, date }` : une fois, à une date ;
+   - `{ freq: 'm', amount, day, from }` : chaque mois au jour `day` à partir de `from`, jusqu'à ce que la dette soit soldée.
+   `remind = { on, alert }` : rappel dans le calendrier à chaque échéance.
+   Un mois clôturé ou qui a déjà un remboursement enregistré est fait : rien n'y est prévu.
+   Le dernier versement est réduit à ce qui reste dû. Renvoie [{ date, ym, amount }] jusqu'au mois `untilYm`. */
+function debtPlanned(d, untilYm = ymAdd(ymNow(), 24)) {
+  const p = d.plan, out = [];
+  if (!p || !(p.amount > 0)) return out;
+  let left = debtLeft(d);
+  const done = ym => isClosed(ym) || d.moves.some(m => m.ym === ym);
+  if (p.freq === 'once') {
+    const ym = p.date ? p.date.slice(0, 7) : null;
+    if (ym && ym <= untilYm && left > 0 && !done(ym)) out.push({ date: p.date, ym, amount: r2(Math.min(p.amount, left)) });
+    return out;
+  }
+  if (!p.day || !p.from) return out;
+  const created = (state.settings.created || '').slice(0, 7);
+  for (let ym = p.from < created ? created : p.from; ym <= untilYm && left > 0; ym = ymAdd(ym, 1)) {
+    if (done(ym)) continue;
+    const a = r2(Math.min(p.amount, left));
+    left = r2(left - a);
+    out.push({ date: `${ym}-${pad(Math.min(p.day, lastDayOf(ym)))}`, ym, amount: a });
+  }
+  return out;
+}
+const debtPlannedIn = (d, ym) => sum(debtPlanned(d, ym).filter(o => o.ym === ym), o => o.amount);
+const debtLabel = d => d.dir === 'owe' ? `Remboursement à ${d.who}` : `Remboursement de ${d.who}`;
 
 const placementFlow = (ym, kind) => sum(state.placements, p => sum(p.ops.filter(o => o.ym === ym && o.kind === kind), o => o.amount));
 function savingsActual(ym) {
@@ -276,9 +304,12 @@ function monthSummary(ym) {
     (f.kind === 'in' ? inc : out).push({ type: 'flow', id: f.id, name: f.name, cat: f.cat, amount: netOf(f, g, emp), gross: g, employer: emp });
   });
   state.oneoffs.forEach(o => { if (o.date.slice(0, 7) === ym) (o.kind === 'in' ? inc : out).push({ type: 'oneoff', id: o.id, name: o.label, cat: o.cat, amount: o.amount }); });
-  state.debts.forEach(d => d.moves.forEach(m => {
-    if (m.ym === ym) (d.dir === 'owe' ? out : inc).push({ type: 'debt', id: d.id, name: d.dir === 'owe' ? `Remboursement à ${d.who}` : `Remboursement de ${d.who}`, cat: '_debt', amount: m.amount });
-  }));
+  state.debts.forEach(d => {
+    d.moves.forEach(m => { if (m.ym === ym) (d.dir === 'owe' ? out : inc).push({ type: 'debt', id: d.id, name: debtLabel(d), cat: '_debt', amount: m.amount }); });
+    /* Remboursement prévu : compté comme une charge (ou une entrée) tant que le mois n'est pas fait. */
+    const planned = debtPlannedIn(d, ym);
+    if (planned) (d.dir === 'owe' ? out : inc).push({ type: 'debt', id: d.id, name: debtLabel(d), cat: '_debt', amount: planned, planned: true });
+  });
   inc.sort((a, b) => b.amount - a.amount); out.sort((a, b) => b.amount - a.amount);
   const closed = isClosed(ym);
   const actual = savingsActual(ym);
@@ -329,6 +360,11 @@ function upcoming(days = 60) {
     if (nd) { const d = daysUntil(nd); if (d >= -3 && d <= days) list.push({ date: nd, title: c.name, sub: 'Résilier avant le', open: ['contract', c.id] }); }
     if (c.endCommit) { const d = daysUntil(c.endCommit); if (d >= -3 && d <= days) list.push({ date: c.endCommit, title: c.name, sub: "Fin d'engagement", open: ['contract', c.id] }); }
   });
+  state.debts.forEach(d => {
+    if (isManualDebt(d)) return;   // dans « À payer »
+    const o = debtPlanned(d, ymAdd(ymNow(), 3)).find(x => daysUntil(x.date) >= -3);
+    if (o && daysUntil(o.date) <= days) list.push({ date: o.date, title: d.dir === 'owe' ? `Rembourser ${d.who}` : `${d.who} te rembourse`, sub: money(o.amount), open: ['debt', d.id] });
+  });
   return list.sort((a, b) => a.date < b.date ? -1 : 1);
 }
 function firstDataYm() {
@@ -366,6 +402,61 @@ function occurrencesBetween(f, from, to) {
   }
   return out;
 }
+
+/* ---------- à payer soi-même ----------
+   Une charge est en paiement automatique par défaut (`f.auto !== false`). Sinon, chaque échéance
+   (jour `f.day`) est à payer à la main jusqu'à ce qu'elle soit marquée payée : `f.paid[ym] = date`.
+   Même chose pour le remboursement prévu d'une dette que je dois (`d.plan.auto === false`) :
+   la marquer payée ajoute un remboursement `{ ym: mois de l'échéance, src: 'pay', date, due }`.
+   `manualFrom` : mois où le paiement est devenu manuel ; rien n'est réclamé avant.
+   Un mois clôturé est fait. */
+const isManualFlow = f => f.kind === 'out' && f.auto === false && !!f.day;
+const isManualDebt = d => d.dir === 'owe' && !!d.plan && d.plan.auto === false;
+/* Échéances à payer soi-même jusqu'au jour `until` compris (payées ou non) : [{ type, id, ym, date, name, cat, amount, paid }]. */
+function manualDues(until, today = todayISO()) {
+  const out = [], now = today.slice(0, 7), uYm = until.slice(0, 7);
+  state.flows.forEach(f => {
+    if (!isManualFlow(f)) return;
+    for (let ym = f.manualFrom || now; ym <= uYm; ym = ymAdd(ym, 1)) {
+      const g = flowGross(f, ym), date = occDate(f, ym);
+      if (g && date <= until && !isClosed(ym)) out.push({ type: 'flow', id: f.id, ym, date, name: f.name, cat: f.cat, amount: g, paid: (f.paid && f.paid[ym]) || null });
+    }
+  });
+  state.debts.forEach(d => {
+    if (!isManualDebt(d)) return;
+    const from = d.plan.manualFrom || now, name = `Rembourser ${d.who}`;
+    debtPlanned(d, uYm).forEach(o => { if (o.ym >= from && o.date <= until) out.push({ type: 'debt', id: d.id, ym: o.ym, date: o.date, name, cat: '_debt', amount: o.amount, paid: null }); });
+    d.moves.forEach(m => { if (m.src === 'pay' && m.due && m.due <= until && !isClosed(m.ym)) out.push({ type: 'debt', id: d.id, ym: m.ym, date: m.due, name, cat: '_debt', amount: m.amount, paid: m.date }); });
+  });
+  return out.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+}
+/* Écran Mois, sur `days` jours : ce qui reste à payer (tous les retards, puis la prochaine échéance
+   de chaque charge ou dette), puis ce qui est déjà payé et pas encore échu. */
+function toPayList(today = todayISO(), days = 31) {
+  const seen = new Set(), todo = [], done = [];
+  manualDues(isoAddDays(today, days), today).forEach(x => {
+    if (x.paid) { if (x.date >= today) done.push(x); return; }
+    const k = x.type + x.id;
+    if (x.date >= today) { if (seen.has(k)) return; seen.add(k); }
+    todo.push(x);
+  });
+  return todo.concat(done);
+}
+/* Marque une échéance payée, ou l'annule. `at` : instant du coche (ISO), comparé à l'heure du point solde. */
+function setPaid(type, id, ym, on, at = new Date().toISOString()) {
+  if (type === 'flow') {
+    const f = state.flows.find(x => x.id === id); if (!f) return;
+    f.paid = f.paid || {};
+    if (on) f.paid[ym] = at; else delete f.paid[ym];
+    return;
+  }
+  const d = state.debts.find(x => x.id === id); if (!d) return;
+  if (!on) { d.moves = d.moves.filter(m => !(m.src === 'pay' && m.ym === ym)); return; }
+  const o = debtPlanned(d, ym).find(x => x.ym === ym);
+  if (o) d.moves.push({ id: uid(), ym, amount: o.amount, src: 'pay', date: at, due: o.date });
+}
+/* Jour local d'un instant ISO (une date seule est rendue telle quelle). */
+const localDay = ts => { if (ts.length <= 10) return ts; const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 /* Prochaine paie : le plus gros revenu daté, à sa prochaine date après aujourd'hui.
    Sans revenu daté : le 1er du mois suivant. */
 function nextPayday(today = todayISO()) {
@@ -384,6 +475,7 @@ function pulse(today = todayISO(), bal = latestBalance()) {
   const pay = nextPayday(today), from = isoMin(bal.date, today), ym = today.slice(0, 7);
   const items = [], ignored = [];
   state.flows.forEach(f => {
+    if (isManualFlow(f)) return;   // compté plus bas, avec ce qui est à payer soi-même
     if (!f.day) {
       /* Sans jour de paiement : une charge du mois est comptée comme encore à passer (prudent),
          un revenu est ignoré. */
@@ -398,6 +490,17 @@ function pulse(today = todayISO(), bal = latestBalance()) {
     });
   });
   state.oneoffs.forEach(o => { if (o.date > from && o.date < pay.date) items.push({ date: o.date, name: o.label, amount: o.kind === 'in' ? o.amount : -o.amount }); });
+  state.debts.forEach(d => { if (!isManualDebt(d)) debtPlanned(d, pay.date.slice(0, 7)).forEach(o => {
+    if (o.date > from && o.date < pay.date) items.push({ date: o.date, name: debtLabel(d), amount: d.dir === 'owe' ? -o.amount : o.amount });
+  }); });
+  /* À payer soi-même : compté tant que le solde saisi ne l'inclut pas (pas encore payé, même en retard),
+     et par prudence quand c'est coché après le point solde. */
+  const balAt = bal.t || `${bal.date}T23:59:59.999Z`;
+  manualDues(isoAddDays(today, 400), today).forEach(x => {
+    if (x.paid ? x.paid <= balAt : x.date >= pay.date) return;
+    const f = x.type === 'flow' && state.flows.find(y => y.id === x.id);
+    items.push({ date: x.date, name: x.name, amount: -(f ? flowNet(f, x.ym) : x.amount), manual: true });
+  });
   if (!isClosed(ym) && savingsActual(ym) === 0) { const plan = savingsPlanned(ym); if (plan) items.push({ date: null, name: 'Épargne prévue', amount: -plan, saving: true }); }
   items.sort((a, b) => (a.date || '0') < (b.date || '0') ? -1 : 1);
   const free = r2(bal.amount + sum(items, x => x.amount));
@@ -526,10 +629,15 @@ function calendarEvents(today = todayISO()) {
     if (f.due && flowStatus(f, now) !== 'ended') add(f.due, `Échéance : ${f.name}`, 'Échéance ou fin d’essai', 'week');
     /* Rappel de prélèvement (ou de versement) à chaque occurrence, sur 12 mois. */
     if (f.remind && f.remind.on && f.day) for (let i = 0; i <= 12; i++) {
-      const ym = ymAdd(now, i), g = flowGross(f, ym);
-      if (!g) continue;
-      add(occDate(f, ym), f.kind === 'out' ? `${f.name} : ${money(g)}` : `${f.name} : +${money(g)}`, f.kind === 'out' ? 'Prélèvement prévu' : 'Versement prévu', f.remind.alert || 'day');
+      const ym = ymAdd(now, i), g = flowGross(f, ym), manual = isManualFlow(f);
+      if (!g || (manual && f.paid && f.paid[ym])) continue;
+      add(occDate(f, ym), f.kind === 'out' ? `${f.name} : ${money(g)}` : `${f.name} : +${money(g)}`, manual ? 'À payer' : f.kind === 'out' ? 'Prélèvement prévu' : 'Versement prévu', f.remind.alert || 'day');
     }
+  });
+  state.debts.forEach(d => {
+    if (d.plan && d.plan.remind && d.plan.remind.on) debtPlanned(d, ymAdd(now, 13)).forEach(o =>
+      add(o.date, d.dir === 'owe' ? `Rembourser ${d.who} : ${money(o.amount)}` : `${d.who} te rembourse : +${money(o.amount)}`,
+        `Reste dû après : ${money(Math.max(0, r2(debtLeft(d) - sum(debtPlanned(d, o.ym), x => x.amount))))}`, d.plan.remind.alert || 'day'));
   });
   state.oneoffs.forEach(o => { if (o.remind && o.remind.on) add(o.date, `${o.label} : ${o.kind === 'in' ? '+' : ''}${money(o.amount)}`, o.kind === 'in' ? 'Entrée prévue' : 'Dépense prévue', o.remind.alert || 'day'); });
   if (state.settings.calClosing !== false)

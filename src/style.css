@@ -89,6 +89,16 @@ svg{display:block;flex:none}
 .item.tap:active{background:var(--s2)}
 .item+.item::before{content:"";position:absolute;left:64px;right:0;top:0;height:1px;background:var(--line)}
 .item.dim{opacity:.5}
+/* À payer : la ligne ouvre la fiche, le rond à droite marque l'échéance payée. */
+.item.pay{padding:0 8px 0 0;gap:2px}
+.pay-open{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:11px 6px 11px 14px;min-height:62px;text-align:left;transition:background-color .15s,opacity .3s}
+.pay-open:active{background:var(--s2)}
+.pay-check{width:44px;height:44px;flex:none;display:grid;place-items:center;border-radius:50%}
+.pay-check i{width:26px;height:26px;border-radius:50%;border:2px solid var(--t3);display:grid;place-items:center;color:transparent;transition:background-color .25s,border-color .25s,color .25s,transform .18s var(--ease)}
+.pay-check:active i{transform:scale(.86)}
+.pay-check[aria-pressed=true] i{background:var(--ok);border-color:var(--ok);color:#000}
+.item.pay.paid .pay-open{opacity:.45}
+.item-sub.late{color:var(--danger)}
 .ico{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;flex:none;color:var(--c,var(--t1));background:color-mix(in srgb,var(--c,#fff) 20%,#1b1b1f)}
 .ico.sq{border-radius:12px}
 .ico .letter{font-weight:700;font-size:16px}

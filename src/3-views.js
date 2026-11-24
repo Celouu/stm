@@ -45,11 +45,28 @@ function pulseCard() {
     </button>
     <div class="row2" style="margin-top:10px"><button class="btn btn-ghost" data-act="balEdit">Mettre à jour</button><button class="btn btn-primary" data-act="afford">Je peux ?</button></div></section>`;
 }
+/* « À payer » : échéances à régler soi-même (charges sans paiement automatique, remboursements de dettes),
+   en retard ou dans le mois qui vient. Le rond marque l'échéance payée ; payée, elle passe en bas. */
+function toPayHTML() {
+  const list = toPayList(); if (!list.length) return '';
+  const today = todayISO(), left = sum(list.filter(x => !x.paid), x => x.amount);
+  const row = x => {
+    const late = !x.paid && x.date < today, at = `data-type="${x.type}" data-id="${x.id}" data-ym="${x.ym}"`;
+    const sub = x.paid ? `Payé le ${fmtDateS(localDay(x.paid))}` : late ? `En retard, ${fmtDateS(x.date)}` : x.date === today ? "Aujourd'hui" : `${fmtDateS(x.date)}, ${relDays(x.date)}`;
+    const ico = x.type === 'debt' ? `<span class="ico" style="--c:var(--out)">${icon('handshake', 19)}</span>` : catIcon('out', x.cat);
+    return `<div class="item pay${x.paid ? ' paid' : ''}" ${at}>
+      <button class="pay-open" data-act="payOpen" ${at}>${ico}<div class="item-main"><div class="item-title">${esc(x.name)}</div><div class="item-sub${late ? ' late' : ''}">${esc(sub)}</div></div><div class="item-amt">${money(x.amount)}</div></button>
+      <button class="pay-check" data-act="payToggle" data-pk="${x.type}|${x.id}|${x.ym}" aria-pressed="${!!x.paid}" aria-label="${x.paid ? 'Pas encore payé' : 'Marquer payé'} : ${esc(x.name)}"><i>${icon('check', 15, 3)}</i></button></div>`;
+  };
+  return `<section class="sec"><div class="sec-head"><h2 class="sec-title">À payer</h2><span class="sec-aside">${left ? money(left) : 'Tout est payé'}</span></div>
+    <div class="group">${list.map(row).join('')}</div></section>`;
+}
 const VIEWS = {};
 VIEWS.mois = () => {
   const s = monthSummary(ui.ym);
   const pending = pendingClosings();
   const notes = [];
+  const upd = ui.newVersion ? `<div class="note" style="margin:0 0 12px"><span class="ico">${icon('download', 20)}</span><div class="note-text"><b>Nouvelle version ${esc(ui.newVersion)}</b>Tes données ne bougent pas.</div><button class="btn btn-primary btn-sm" data-act="appUpdate">Mettre à jour</button></div>` : '';
   if (!isStandalone()) notes.push(`<div class="note"><span class="ico">${icon('install', 20)}</span><div class="note-text"><b>Installe STM sur ton écran d'accueil</b>Sinon Safari peut effacer tes données.</div><button class="btn btn-ghost btn-sm" data-act="installHelp">Comment</button></div>`);
   const rev = reviewDue();
   if (rev) notes.push(`<div class="note"><span class="ico">${icon('sparkle', 20)}</span><div class="note-text"><b>Ton bilan ${yearLabel(rev)} est prêt</b>Ton année d'alternance en quelques écrans.</div><button class="btn btn-ghost btn-sm" data-act="review" data-start="${rev}">Voir</button></div>`);
@@ -68,18 +85,19 @@ VIEWS.mois = () => {
   const empty = !state.flows.length && !state.oneoffs.length;
   const up = upcoming(60);
   const rowsFor = (list, kind) => list.map(x => {
-    const sub = x.type === 'oneoff' ? `${catById(kind, x.cat).name}, ponctuel` : x.type === 'debt' ? 'Dette' : catById(kind, x.cat).name + (x.employer ? `, employeur ${x.employer} %` : '');
+    const sub = x.type === 'oneoff' ? `${catById(kind, x.cat).name}, ponctuel` : x.type === 'debt' ? (x.planned ? 'Dette, prévu' : 'Dette') : catById(kind, x.cat).name + (x.employer ? `, employeur ${x.employer} %` : '');
     const attrs = `data-type="${x.type}" data-id="${x.id}"`;
     return itemRow({ act: 'openItem', attrs, ico: catIcon(kind, x.cat), title: x.name, sub, amt: (kind === 'in' ? '+' : '−') + money(x.amount), amtSmall: x.employer ? `<small>${money(x.gross)}</small>` : '' });
   }).join('');
 
   return `
   <div class="topbar"><span class="wordmark">STM</span><button class="icon-btn" data-act="settings" aria-label="Réglages">${icon('settings', 21)}</button></div>
+  ${upd}
   ${heroHTML(s)}
   <div id="moisBody">
   ${gapNote(monthGap(ui.ym), ui.ym)}
   ${cta}
-  ${ui.ym === ymNow() ? pulseCard() : ''}
+  ${ui.ym === ymNow() ? toPayHTML() + pulseCard() : ''}
   ${notes.join('')}
   ${empty ? `<div class="empty" style="margin-top:22px"><h3>Commence par tes flux</h3><p>Salaire, aides, loyer, abonnements : ajoute ce qui revient chaque mois.</p><button class="btn btn-primary" data-act="addFlow">Ajouter un flux</button></div>` : ''}
   ${up.length ? `<section class="sec"><div class="sec-head"><h2 class="sec-title">À venir</h2></div><div class="group">${up.map(u => itemRow({ act: 'openItem', attrs: `data-type="${u.open[0]}" data-id="${u.open[1]}"`, ico: `<span class="ico sq">${icon('calendar', 19)}</span>`, title: u.title, sub: `${u.sub} ${fmtDateS(u.date)}`, amt: `<span class="muted small">${relDays(u.date)}</span>` })).join('')}</div></section>` : ''}
@@ -145,7 +163,7 @@ VIEWS.flux = () => {
     if (st === 'paused') bits.push('en pause');
     if (st === 'future') bits.push(`dès ${ymMonth(f.hist[0].from)}`);
     if (st === 'ended') bits.push(`résilié en ${ymMonth(f.end)}`);
-    if (f.day && st !== 'ended') bits.push(`le ${f.day === 1 ? '1er' : f.day}`);
+    if (f.day && st !== 'ended') bits.push(`${isManualFlow(f) ? 'à payer le' : 'le'} ${f.day === 1 ? '1er' : f.day}`);
     if (f.due && st !== 'ended') bits.push(`échéance ${fmtDateS(f.due)}`);
     const rowHTML = itemRow({ act: 'openItem', attrs: `data-type="flow" data-id="${f.id}"`, ico: catIcon(kind, f.cat), title: f.name, sub: cap(bits.join(', ')), amt: money(netOf(f, amt, t.employer)), amtSmall: f.kind === 'out' && t.employer ? `<small>${money(amt)}</small>` : '', dim: st !== 'active' });
     if (st !== 'active' && st !== 'paused') return rowHTML;
@@ -186,8 +204,9 @@ VIEWS.epargne = () => {
     return itemRow({ act: 'openItem', attrs: `data-type="placement" data-id="${p.id}"`, ico: `<span class="ico" style="--c:var(--plc)">${icon('coins', 19)}</span>`, title: p.name, sub, amt: money(b.value) });
   }).join('');
   const debts = state.debts.map(d => {
-    const left = debtLeft(d), paid = r2(d.amount - left);
-    return itemRow({ act: 'openItem', attrs: `data-type="debt" data-id="${d.id}"`, ico: `<span class="ico" style="--c:${d.dir === 'owe' ? 'var(--out)' : 'var(--in)'}">${icon('handshake', 19)}</span>`, title: d.dir === 'owe' ? `Je dois à ${d.who}` : `${d.who} me doit`, sub: left <= 0 ? 'Soldé' : `Remboursé ${money(paid)} sur ${money(d.amount)}`, amt: money(Math.max(0, left)), dim: left <= 0 });
+    const left = debtLeft(d), paid = r2(d.amount - left), next = debtPlanned(d)[0];
+    const sub = left <= 0 ? 'Soldé' : next ? `Prochain : ${money(next.amount)} le ${fmtDateS(next.date)}` : `Remboursé ${money(paid)} sur ${money(d.amount)}`;
+    return itemRow({ act: 'openItem', attrs: `data-type="debt" data-id="${d.id}"`, ico: `<span class="ico" style="--c:${d.dir === 'owe' ? 'var(--out)' : 'var(--in)'}">${icon('handshake', 19)}</span>`, title: d.dir === 'owe' ? `Je dois à ${d.who}` : `${d.who} me doit`, sub, amt: money(Math.max(0, left)), dim: left <= 0 });
   }).join('');
   return `
   <div class="title-row"><h1 class="title">Épargne</h1>${addBtn('addSaving', 'Ajouter')}</div>

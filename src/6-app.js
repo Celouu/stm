@@ -16,7 +16,8 @@ function openClosing(ym) {
     draft.values[p.id] = placementValueAt(p, ym);
   });
   const debtsHere = state.debts.filter(d => debtLeft(d) > 0 || d.moves.some(m => m.ym === ym));
-  debtsHere.forEach(d => { const m = d.moves.find(x => x.ym === ym && x.src === 'close'); draft.debts[d.id] = m ? m.amount : 0; });
+  /* Un remboursement prévu ce mois-ci est proposé d'office, comme le versement prévu d'un objectif. */
+  debtsHere.forEach(d => { const m = d.moves.find(x => x.ym === ym && x.src === 'close'); draft.debts[d.id] = m ? m.amount : reopen ? 0 : debtPlannedIn(d, ym); });
 
   const flowRow = (x, kind) => itemRow({ act: 'openItem', attrs: `data-type="${x.type}" data-id="${x.id}" data-ym="${ym}"`, ico: catIcon(kind, x.cat), title: x.name, sub: catById(kind, x.cat).name, amt: (kind === 'in' ? '+' : '−') + money(x.amount) });
   const steps = [
@@ -41,7 +42,9 @@ function openClosing(ym) {
         return `<div class="empty"><h3>Rien à suivre ici</h3><p>Crée un objectif, un placement ou une dette depuis l'onglet Épargne.</p><button class="btn btn-ghost" data-act="addGoal">Créer un objectif</button></div>`;
       const goals = state.goals.map(g => `<div class="field"><span class="lbl">${esc(g.name)} <span style="color:var(--t3)">${money(goalSaved(g), { whole: true })} / ${money(g.target, { whole: true })}</span></span>${moneyField('g_' + g.id, draft.goals[g.id], '0', 'sm')}</div>`).join('');
       const plcs = state.placements.map(p => `<div class="field"><span class="lbl">${esc(p.name)}</span><div class="row2"><div><span class="lbl hint" style="margin:0 4px 6px">Valeur fin ${MONTHS_S[ymParts(ym)[1] - 1]}</span><div class="suffix" data-suffix="€"><input class="input" name="v_${p.id}" inputmode="decimal" value="${plainNum(draft.values[p.id])}"></div></div><div><span class="lbl hint" style="margin:0 4px 6px">Versement perso</span><div class="suffix" data-suffix="€"><input class="input" name="d_${p.id}" inputmode="decimal" value="${draft.deposits[p.id] ? plainNum(draft.deposits[p.id]) : ''}" placeholder="0"></div></div></div></div>`).join('');
-      const debts = debtsHere.map(d => `<div class="field"><span class="lbl">${d.dir === 'owe' ? `Remboursé à ${esc(d.who)}` : `Reçu de ${esc(d.who)}`} <span style="color:var(--t3)">reste ${money(Math.max(0, debtLeft(d)))}</span></span>${moneyField('r_' + d.id, draft.debts[d.id] || null, '0', 'sm')}</div>`).join('');
+      /* Ce qui a déjà été marqué payé ce mois-ci (« À payer ») est rappelé, pour ne pas le saisir deux fois. */
+      const already = d => sum(d.moves.filter(m => m.ym === ym && m.src !== 'close'), m => m.amount);
+      const debts = debtsHere.map(d => `<div class="field"><span class="lbl">${d.dir === 'owe' ? `Remboursé à ${esc(d.who)}` : `Reçu de ${esc(d.who)}`} <span style="color:var(--t3)">reste ${money(Math.max(0, debtLeft(d)))}${already(d) ? `, déjà ${money(already(d))} ce mois-ci` : ''}</span></span>${moneyField('r_' + d.id, draft.debts[d.id] || null, '0', 'sm')}</div>`).join('');
       return `<p class="step-lead">Ce que tu as mis de côté en ${ymMonth(ym)}.</p>
         ${goals ? `<h3 class="sec-title" style="font-size:17px;margin:0 4px 12px">Objectifs</h3>${goals}` : ''}
         ${plcs ? `<h3 class="sec-title" style="font-size:17px;margin:20px 4px 12px">Placements</h3>${plcs}` : ''}
@@ -204,7 +207,7 @@ function openCalSetup() {
         <p><b>Te tromper.</b> Maintiens l’action en trop, puis « Supprimer ».</p>
       </div>
       <p class="hint" style="margin-top:16px">Tu vas passer de STM à Raccourcis : STM retient l’étape où tu en es.</p>
-      ${needs ? '' : `<button class="link-btn gd-skip" data-act="sheet" data-fn="ready">J’ai déjà le raccourci, synchroniser</button>`}` },
+      ${needs ? '' : `<button class="link-btn gd-skip" data-act="sheet" data-fn="ready">Mon raccourci est déjà complet : synchroniser</button>`}` },
 
     { title: 'Le calendrier STM', body: () => `
       <p class="step-lead">Les rappels de STM vont dans un calendrier à part. Le raccourci ne touche jamais à tes autres événements.</p>
@@ -287,6 +290,7 @@ function openCalSetup() {
       <h3 class="gd-h">Ça ne marche pas ?</h3>
       <div class="gd-list">
         <p><b>« Raccourci introuvable ».</b> Vérifie le nom : ${t(CAL_SHORTCUT)}, exactement.</p>
+        <p><b>« Ne contient aucune action ».</b> Le raccourci existe mais il est vide : ajoute-lui les actions des étapes 2 à 7.</p>
         <p><b>Rien dans le calendrier.</b> Les actions 6 à 26 doivent être décalées vers la droite, dans la boucle. Et « Calendrier » doit valoir STM dans les actions 23, 25 et 26.</p>
         <p><b>Rappels à minuit ou sur toute la journée.</b> Désactive « Journée entière » dans les actions 23, 25 et 26.</p>
         <p><b>Une confirmation à chaque synchro.</b> Dans Réglages › Apps › Raccourcis › Avancé, autorise la suppression sans confirmation.</p>
@@ -335,11 +339,11 @@ function openSettings() {
     <div class="sec-head" style="margin:24px 4px 10px"><h3 class="sec-title" style="font-size:17px">Calendrier</h3>${s.calReady ? `<span class="sec-aside small">${s.lastCalSync ? (daysSince(s.lastCalSync) === 0 ? "Synchronisé aujourd'hui" : `Synchronisé il y a ${daysSince(s.lastCalSync)} j`) : 'Jamais synchronisé'}</span>` : ''}</div>
     <div class="group">
       ${s.calReady ? `<button class="setting" data-act="calSync"><span class="ico">${icon('calendar', 19)}</span><span class="grow">Synchroniser maintenant</span>${calPending() ? '<span class="val">À mettre à jour</span>' : ''}${icon('chevR', 18)}</button>
+      <button class="setting" data-act="calSetup"><span class="ico">${icon('book', 19)}</span><span class="grow">Guide pour créer le raccourci</span>${icon('chevR', 18)}</button>
       <div class="setting"><span class="grow">Synchroniser automatiquement</span><button class="switch" role="switch" aria-checked="${s.calAuto !== false}" data-act="sheet" data-fn="calAuto" aria-label="Synchroniser automatiquement"></button></div>
       <label class="setting"><span class="grow">Heure des rappels</span><select class="input" name="calHour" style="width:110px;height:42px">${Array.from({ length: 17 }, (_, i) => i + 6).map(h => `<option value="${h}" ${h === (s.calHour ?? 9) ? 'selected' : ''}>${h} h</option>`).join('')}</select></label>
       <div class="setting"><span class="grow">Point solde chaque dimanche</span><button class="switch" role="switch" aria-checked="${s.calWeekly !== false}" data-act="sheet" data-fn="calWeekly" aria-label="Point solde chaque dimanche"></button></div>
-      <div class="setting"><span class="grow">Rappel de clôture chaque mois</span><button class="switch" role="switch" aria-checked="${s.calClosing !== false}" data-act="sheet" data-fn="calClosing" aria-label="Rappel de clôture chaque mois"></button></div>
-      <button class="setting" data-act="calSetup"><span class="grow">Configuration du raccourci</span>${icon('chevR', 18)}</button>`
+      <div class="setting"><span class="grow">Rappel de clôture chaque mois</span><button class="switch" role="switch" aria-checked="${s.calClosing !== false}" data-act="sheet" data-fn="calClosing" aria-label="Rappel de clôture chaque mois"></button></div>`
       : `<button class="setting" data-act="calSetup"><span class="ico">${icon('calendar', 19)}</span><span class="grow">Connecter le calendrier</span>${icon('chevR', 18)}</button>`}
     </div>
     <div class="sec-head" style="margin:24px 4px 10px"><h3 class="sec-title" style="font-size:17px">Sauvegarde</h3><span class="sec-aside small">${d === null ? 'Jamais faite' : d === 0 ? "Faite aujourd'hui" : `Il y a ${d} j`}</span></div>
@@ -632,6 +636,7 @@ const ACTIONS = {
   addOneoff: el => openOneoff(null, { ym: el.dataset.ym }),
   addContract: el => openContract(null, { flow: el.dataset.flow }),
   calSync: () => syncCalendar(),
+  appUpdate: () => applyUpdate(),
   balSave: () => {
     const el = $('#view [name="balNow"]'), v = el ? parseAmount(el.value) : NaN;
     if (isNaN(v)) { if (el) { shake(el.closest('.money')); el.focus(); } toast('Tape ton solde', 'close'); return; }
@@ -642,6 +647,15 @@ const ACTIONS = {
   balEdit: () => { ui.balEdit = true; render(false); const el = $('#view [name="balNow"]'); if (el) { el.focus(); el.select(); } },
   pulseOpen: () => openPulse(),
   afford: () => openAfford(),
+  payOpen: el => el.dataset.type === 'debt' ? openDebt(el.dataset.id) : openFlow(el.dataset.id),
+  /* Rond « À payer » : coché, l'échéance est payée et passe en bas de la liste. */
+  payToggle: el => {
+    const pk = el.dataset.pk, [type, id, ym] = pk.split('|'), on = el.getAttribute('aria-pressed') !== 'true';
+    setPaid(type, id, ym, on); save(); render(false);
+    toast(on ? 'Payé' : 'Remis à payer', on ? 'check' : 'repeat');
+    const c = $(`#view [data-pk="${CSS.escape(pk)}"] i`);
+    if (on && c && motionOK()) c.animate([{ transform: 'scale(.4)' }, { transform: 'scale(1.18)', offset: .6 }, { transform: 'none' }], { duration: 420, easing: EASE });
+  },
   review: el => openReview(el.dataset.start || yearStartOf(ymNow())),
   calSetup: () => openCalSetup(),
   addSaving: () => openSavingChooser(),
@@ -679,9 +693,28 @@ async function init() {
   let hiddenAt = 0;
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) hiddenAt = Date.now();
-    else if (state.settings.pin && hiddenAt && Date.now() - hiddenAt > 60000) showLock('unlock');
+    else { if (state.settings.pin && hiddenAt && Date.now() - hiddenAt > 60000) showLock('unlock'); checkUpdate(); }
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && sheetStack.length && !lockEl && !reviewEl) closeSheet(); });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  checkUpdate();
+}
+
+/* ---------- nouvelle version ----------
+   Une app installée sur l'écran d'accueil peut garder l'ancienne page longtemps (cache du service
+   worker, cache navigateur de GitHub Pages). À l'ouverture et au retour dans l'app, STM lit la version
+   du service worker publié ; si elle diffère, l'écran Mois propose de mettre à jour. */
+async function checkUpdate() {
+  if (location.protocol !== 'https:') return;
+  try {
+    const v = ((await (await fetch('sw.js', { cache: 'no-store' })).text()).match(/'stm-([^']+)'/) || [])[1];
+    if (v && v !== APP_VERSION && v !== ui.newVersion) { ui.newVersion = v; if (ui.tab === 'mois' && !sheetStack.length) render(false); }
+  } catch (e) {}
+}
+/* Vide les caches et recharge avec une adresse neuve : ni le service worker ni le navigateur
+   ne peuvent resservir l'ancienne page. */
+async function applyUpdate() {
+  try { await Promise.all((await caches.keys()).map(k => caches.delete(k))); } catch (e) {}
+  location.replace(`./?v=${encodeURIComponent(ui.newVersion || Date.now())}`);
 }
 init();
